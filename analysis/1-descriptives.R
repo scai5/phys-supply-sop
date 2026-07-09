@@ -5,35 +5,6 @@
 # Date created:   11/14/2025 
 # Last edited:    12/12/2025 
 
-# Helper functions -------------------------------------------------------------
-
-# Function that returns summary stats
-describe <- function(variable){
-  summ <- summary(variable)
-  summ <- c("Mean" = mean(variable, na.rm=TRUE),
-            "SD" = sd(variable, na.rm=TRUE),
-            "Min" = min(variable, na.rm=TRUE),
-            "Max" = max(variable, na.rm=TRUE),
-            "N" = sum(!is.na(variable)))
-  return(tibble(summ))
-}
-
-# Get treatment / control means and SDs, difference in means, t-stat and p-value
-getBalanceRow <- function(covariate, treatment){
-  t_group <- covariate[treatment == 1]
-  c_group <- covariate[treatment == 0]
-  
-  res <- t.test(t_group, c_group, conf.level = 0.95, na.action = na.omit, var.equal = TRUE)
-  
-  balanceRow <- c("control_mean" = mean(c_group, na.rm = TRUE),
-                  "control_sd" = sd(c_group, na.rm = TRUE),
-                  "treat_mean" = mean(t_group, na.rm = TRUE), 
-                  "treat_sd" = sd(t_group, na.rm = TRUE), 
-                  "diff_mean" = mean(t_group, na.rm = TRUE) - mean(c_group, na.rm = TRUE),
-                  "t-stat" = res$statistic, 
-                  "p-value" = res$p.value)
-}
-
 # Summary tables ---------------------------------------------------------------
 
 ## Summary stats (state) -------------------------------------------------------
@@ -45,7 +16,7 @@ summ <- df %>%
                    fm_wage_a_mean, im_wage_a_mean, peds_wage_a_mean,
                    population,
                    Dmissing_md, Dmissing_do, Dmissing_pop,
-                   FPA),
+                   FPA, treat),
                  describe))
 summ <- as.data.frame(t(summ))
 colnames(summ) <- c("Mean", "Std. Dev", "Min", "Max", "N")
@@ -88,6 +59,35 @@ summ_tab <- gt(summ, rowname_col = "Variable") %>%
 gtsave(summ_tab, "results/descr/summ-stats.html")
 gtsave(summ_tab, "results/descr/summ-stats.tex")
 
-# Summary stats (county) -------------------------------------------------------
+## Summary stats (county) -------------------------------------------------------
 
 # TODO
+
+# Event time descriptives ------------------------------------------------------
+
+# Observations per event time 
+df %>%
+  filter(treat == 1) %>% 
+  ggplot(aes(x = time_to_treat)) + 
+  geom_histogram(binwidth = 1) + 
+  labs(
+    x = "Time to treat (treated only)", 
+    y = "Count"
+  )
+ggsave(
+  "results/event-study/time_to_treat_hist.png", scale = 2,
+  width = 1200, height = 900, units = "px"
+)
+
+df_c %>%
+  filter(treat == 1) %>% 
+  ggplot(aes(x = time_to_treat)) + 
+  geom_histogram(binwidth = 1) + 
+  labs(
+    x = "Time to treat (treated only)", 
+    y = "Count"
+  )
+ggsave(
+  "results/event-study/time_to_treat_hist_county.png", scale = 2,
+  width = 1200, height = 900, units = "px"
+)

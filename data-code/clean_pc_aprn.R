@@ -1,10 +1,9 @@
 # About ------------------------------------------------------------------------
 
-# Cleaning physician and APRN location from Physician Compare
+# Aggregating billing APRNs from Physician Compare
 # Author:         Shirley Cai 
 # Date created:   06/10/2024  
-# Last edited:    07/08/2026
-#                 Updated to include APRNs, includes D_aprn indicator
+# Last edited:    02/28/2026
 
 # Import and merge data --------------------------------------------------------
 
@@ -78,33 +77,23 @@ df <- df %>%
     zip_code = substr(zip_code, 1, 5)
   )
 
-# Sample restrictions ----------------------------------------------------------
+# Include only APRNs -----------------------------------------------------------
 
-## Removing NPIs who are not physicians or APRNs -------------------------------
+# APRNs include NPs, CRNAs, CNMs, and CNS
+# Requires a Master's (MSN) or Doctor of Nursing Practice (DNP)
 
-# Attempt to limit to MD using specialty
-exclude_specialty <- c("CHIROPRACTIC", "PODIATRY", "OPTOMETRY", "DENTIST", "ORAL SURGERY (DENTIST ONLY)",
-                       "CLINICAL PSYCHOLOGIST", "MENTAL HEALTH COUNSELOR", "PSYCHOLOGIST, CLINICAL", 
-                       "PHYSICAL THERAPIST", "PHYSICAL THERAPY", 
-                       "CLINICAL SOCIAL WORKER", "PHYSICIAN ASSISTANT", "ANESTHESIOLOGY ASSISTANT",
-                       "REGISTERED DIETITIAN OR NUTRITION PROFESSIONAL",
-                       "UNDEFINED NON-PHYSICIAN TYPE (SPECIFY)")
-aprn_specialty <- c("NURSE PRACTITIONER", 
-                    "CERTIFIED REGISTERED NURSE ANESTHETIST", "CERTIFIED REGISTERED NURSE ANESTHETIST (CRNA)", 
-                    "CERTIFIED NURSE MIDWIFE", "CERTIFIED NURSE MIDWIFE (CNM)",
-                    "CLINICAL NURSE SPECIALIST", "CERTIFIED CLINICAL NURSE SPECIALIST (CNS)")
+# Limit to APRN using specialty
+include_specialty <- c("NURSE PRACTITIONER", 
+                       "CERTIFIED REGISTERED NURSE ANESTHETIST", "CERTIFIED REGISTERED NURSE ANESTHETIST (CRNA)", 
+                       "CERTIFIED NURSE MIDWIFE", "CERTIFIED NURSE MIDWIFE (CNM)",
+                       "CLINICAL NURSE SPECIALIST", "CERTIFIED CLINICAL NURSE SPECIALIST (CNS)")
 
-message("Non-doctor or APRN Compare specialty ----------")
-message(paste0("Total physician-year obs.: ", nrow(df)))
-message(paste0("Non-doctor or APRN Compare specialty worker-year obs.: ", 
-               sum(df$primary_specialty %in% exclude_specialty)))
-message(paste0("Non-doctor or APRN Compare specialty workers: ", 
-               length(unique(df$npi[df$primary_specialty %in% exclude_specialty]))))
-df <- df %>% 
-  filter(!(primary_specialty %in% exclude_specialty %>% tidyr::replace_na(FALSE)))
-message("Removed non-doctor or APRN specialty Compare observations")
-
-df <- df %>% mutate(D_aprn = ifelse(primary_specialty %in% aprn_specialty, 1, 0))
+message("Number of APRNs billing for Medicare ----------")
+message(paste0("Total NPI-year obs.: ", nrow(df)))
+message(paste0("ARPN NPI-year obs.: ", sum(df$primary_specialty %in% include_specialty)))
+message(paste0("Unique APRN: ", length(unique(df$npi[df$primary_specialty %in% include_specialty]))))
+df <- df %>% filter(primary_specialty %in% include_specialty)
+message("Removed non-APRN observations")
 
 # Assign one ZIP to each NPI-year observation ----------------------------------
 
@@ -151,59 +140,45 @@ df <- df %>%
            organization_legal_name, address_line_1, .keep_all = TRUE)
 message("Removed approximately duplicate rows")
 
-# Prepare for export -----------------------------------------------------------
+# Merge in county --------------------------------------------------------------
 
-## Get static characteristics --------------------------------------------------
+# xw ZIP to county 
+zip_xw <- read_tsv('data/output/zipcounty-xw.txt') 
+df <- df %>% left_join(zip_xw, by = c('zip_code' = 'zip'))
 
-# Observation = NPI
-# Medical school and graduation year should not change yearly
+df <- df %>% distinct(npi, year, county)
 
-phys_char <- df %>% 
-  filter(D_aprn == 0) %>% 
-  select(npi, year, medical_school_name, graduation_year) %>% 
-  distinct_at(vars(-year), .keep_all = TRUE)
-
-single <- phys_char %>% group_by(npi) %>% filter(n() == 1) %>% ungroup() %>% 
-  select(-c(year))
-dupe <- phys_char %>% group_by(npi) %>% filter(n() > 1) %>% ungroup() %>% 
-  mutate(medical_school_name = replace(medical_school_name, medical_school_name == "OTHER", NA))
-dupe <- dupe %>% 
-  group_by(npi) %>% 
-  arrange(npi, desc(year)) %>% 
-  summarise(
-    medical_school_name = first(na.omit(medical_school_name)),
-    graduation_year = first(na.omit(graduation_year))
-  )
-
-static_char <- bind_rows(single, dupe)
-rm(phys_char)
-rm(single)
-rm(dupe)
-gc()
-
-## Get dynamic characteristics -------------------------------------------------
-
-# Observation = NPI-year
-# Location can change each year 
-
-phys_char <- df %>% 
-  select(npi, year, primary_specialty, all_secondary_specialties,
-         organization_legal_name, group_practice_pac_id, n_group_members,
-         address_line_1, zip_code, cbsa, Dfemale, D_aprn)
-
-message(paste0("Distinct physician-year obs.: ", nrow(phys_char %>% distinct(npi, year))))
-
-# For physicians with more than one ZIP, randomly choose a ZIP
+# Break county ties
 set.seed(1234)
-phys_char <- phys_char %>% 
+df <- df %>% 
   group_by(npi, year) %>% 
   slice_sample(n = 1) %>%
   ungroup()
+
+# Aggregate to the county-year level 
+agg_df <- df %>% 
+  group_by(county, year) %>% 
+  summarise(
+    aprn_medicare = n()
+  )
+
+# TODO: Figure out why 2023 is all missing zip 
+
+agg_df <- agg_df %>% filter(!is.na(county))
+
+# Split up state and county FIPS 
+agg_df <- agg_df %>% 
+  rename(full_fips = county) %>% 
+  mutate(
+    state_fips = substr(full_fips, 1, 2), 
+    county_fips = substr(full_fips, 3, 5)
+  ) %>% 
+  ungroup() %>% 
+  select(-c(full_fips))
 
 # Export -----------------------------------------------------------------------
 
 gc()
 
-write_tsv(static_char,'data/output/phys-compare-static.txt')
-write_tsv(phys_char, 'data/output/phys-compare-dynamic.txt')
+write_csv(agg_df, 'data/output/phys-compare-aprn.csv')
 rm(list = ls())
