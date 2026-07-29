@@ -3,17 +3,20 @@
 # Cleaning physician and APRN location from Physician Compare
 # Author:         Shirley Cai 
 # Date created:   06/10/2024  
-# Last edited:    07/08/2026
-#                 Updated to include APRNs, includes D_aprn indicator
+# Last edited:    07/16/2026
+#                 Updated to pull speciality from NPPES
 
 # Import and merge data --------------------------------------------------------
 
+ptax <- read_csv('data/output/nppes_taxonomy.csv') %>% 
+  mutate(D_ptax = TRUE)
+
 years <- formatC(14:23, width = 2, flag = "0")
-varname_xw <- read_csv('data/input/physician-compare/ndf-xw.csv', n_max = 37) 
+varname_xw <- read_csv('data/input/physician-compare/ndf-xw.csv', n_max = 26) 
 
 read_compare <- function(yr){
   if(yr == "16"){
-    raw <- read_csv(paste0("data/input/physician-compare/National_Downloadable_File_20", yr, ".csv"), 
+    raw <- read_csv(paste0("data/input/physician-compare/National_Downloadable_File_20", yr, ".csv"),
                     col_types = list(.default = col_character()), 
                     col_names = FALSE) %>% 
       clean_names()
@@ -43,14 +46,33 @@ read_compare <- function(yr){
   } else if (yr == "17"){
     raw <- raw %>% 
       renamefrom(cw_file = varname_xw, raw = colnames_2017, clean = clean)
-  } else {
+  } else if (yr == "23"){
+    raw <- raw %>% 
+      renamefrom(cw_file = varname_xw, raw = colnames_2023, clean = clean)
+  } else {    
     raw <- raw %>% 
       renamefrom(cw_file = varname_xw, raw = colnames_2018, clean = clean)
   }
   
+  print(yr)
+  
+  # Trim down
+  raw <- raw %>% select(npi, gender, credential, zip_code,
+                        medical_school_name, graduation_year)
+  raw <- raw %>% distinct_all()
+  
   # Add year variable
   raw <- raw %>%
-    mutate(year = as.numeric(paste0("20", yr)))
+    mutate(year = as.numeric(paste0("20", yr)), 
+           npi = as.numeric(npi))
+  
+  # Filter by specialty using NPPES taxonomy code for that year
+  raw <- raw %>% 
+    left_join(ptax, by = c('npi', 'year')) %>% 
+    filter(D_ptax == TRUE)
+  
+  raw <- raw %>% select(-c(D_ptax))
+  
   return(raw)
 }
 
@@ -63,48 +85,15 @@ gc()
 
 # Cast to numeric, change indicator variables, get short zip
 df <- df %>% 
-  mutate(
-    npi = as.numeric(npi), 
+  mutate( 
     Dfemale = case_when(gender == "M" ~ 0, 
                         gender == "F" ~ 1, 
                         gender == "U" ~ NA, 
                         TRUE ~ NA), 
     graduation_year = as.numeric(graduation_year), 
-    n_group_members = as.numeric(n_group_members), 
-    Daddress_line_2_suppressed = case_when(Daddress_line_2_suppressed == "Y" ~ 1, 
-                                           Daddress_line_2_suppressed == "N" ~ 0, 
-                                           TRUE ~ NA), 
     zip_full = zip_code, 
     zip_code = substr(zip_code, 1, 5)
   )
-
-# Sample restrictions ----------------------------------------------------------
-
-## Removing NPIs who are not physicians or APRNs -------------------------------
-
-# Attempt to limit to MD using specialty
-exclude_specialty <- c("CHIROPRACTIC", "PODIATRY", "OPTOMETRY", "DENTIST", "ORAL SURGERY (DENTIST ONLY)",
-                       "CLINICAL PSYCHOLOGIST", "MENTAL HEALTH COUNSELOR", "PSYCHOLOGIST, CLINICAL", 
-                       "PHYSICAL THERAPIST", "PHYSICAL THERAPY", 
-                       "CLINICAL SOCIAL WORKER", "PHYSICIAN ASSISTANT", "ANESTHESIOLOGY ASSISTANT",
-                       "REGISTERED DIETITIAN OR NUTRITION PROFESSIONAL",
-                       "UNDEFINED NON-PHYSICIAN TYPE (SPECIFY)")
-aprn_specialty <- c("NURSE PRACTITIONER", 
-                    "CERTIFIED REGISTERED NURSE ANESTHETIST", "CERTIFIED REGISTERED NURSE ANESTHETIST (CRNA)", 
-                    "CERTIFIED NURSE MIDWIFE", "CERTIFIED NURSE MIDWIFE (CNM)",
-                    "CLINICAL NURSE SPECIALIST", "CERTIFIED CLINICAL NURSE SPECIALIST (CNS)")
-
-message("Non-doctor or APRN Compare specialty ----------")
-message(paste0("Total physician-year obs.: ", nrow(df)))
-message(paste0("Non-doctor or APRN Compare specialty worker-year obs.: ", 
-               sum(df$primary_specialty %in% exclude_specialty)))
-message(paste0("Non-doctor or APRN Compare specialty workers: ", 
-               length(unique(df$npi[df$primary_specialty %in% exclude_specialty]))))
-df <- df %>% 
-  filter(!(primary_specialty %in% exclude_specialty %>% tidyr::replace_na(FALSE)))
-message("Removed non-doctor or APRN specialty Compare observations")
-
-df <- df %>% mutate(D_aprn = ifelse(primary_specialty %in% aprn_specialty, 1, 0))
 
 # Assign one ZIP to each NPI-year observation ----------------------------------
 
@@ -132,23 +121,13 @@ message(paste0("Multiple CBSA physicians: ",
 rm(cbsa_xw)
 gc()
 
-df <- df %>% group_by(npi, year) %>% mutate(n_state = length(unique(state))) %>% ungroup()
-
-message("Multiple practice states ----------")
-message(paste0("Total physician-year obs.: ", nrow(df)))
-message(paste0("Multiple state physician-year obs.: ", 
-               sum(df$n_state > 1)))
-message(paste0("Multiple state physicians: ", 
-               length(unique(df$npi[df$n_state > 1]))))
-
 # TODO: Figure out a better way to determine multiple practice location: CBSA likely not broad enough
 
 df <- df %>% filter(n_cbsa == 1)
 message("Removed physicians practicing in multiple CBSA codes")
 
 df <- df %>% 
-  distinct(npi, year, pac_id, enroll_id, medical_school_name, zip_code, 
-           organization_legal_name, address_line_1, .keep_all = TRUE)
+  distinct(npi, year, medical_school_name, graduation_year, zip_code, .keep_all = TRUE)
 message("Removed approximately duplicate rows")
 
 # Prepare for export -----------------------------------------------------------
@@ -187,9 +166,7 @@ gc()
 # Location can change each year 
 
 phys_char <- df %>% 
-  select(npi, year, primary_specialty, all_secondary_specialties,
-         organization_legal_name, group_practice_pac_id, n_group_members,
-         address_line_1, zip_code, cbsa, Dfemale, D_aprn)
+  select(npi, year, zip_code, cbsa, Dfemale, D_pcp, D_spec, D_aprn)
 
 message(paste0("Distinct physician-year obs.: ", nrow(phys_char %>% distinct(npi, year))))
 

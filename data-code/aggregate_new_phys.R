@@ -14,7 +14,8 @@
 # Keep physician's "first" location choice -------------------------------------
 
 # Read in location data for physicians only 
-df <- read_csv('data/output/phys_aprn_location.csv') %>% filter(D_aprn = 0)
+df <- read_csv('data/output/phys_aprn_location.csv') %>% filter(D_aprn == 0)
+df <- df %>% select(-c(D_aprn))
 
 # Merge in graduation year
 pc_static <- read_tsv('data/output/phys-compare-static.txt')
@@ -45,8 +46,8 @@ df <- df %>% filter(year > 2013)
 
 # Merge in NPPES
 nppes <- read_csv('data/output/nppes.csv') %>% 
-  mutate(D_nppes = 1)
-df <- df %>% left_join(nppes, by = 'npi')
+  mutate(D_nppes = 1) 
+df <- df %>% left_join(nppes, by = c('npi', 'year'))
 
 message(paste0('Total observations: ', nrow(df)))
 message(paste0('No NPPES match: ', sum(is.na(df$D_nppes))))
@@ -54,17 +55,17 @@ message(paste0('No NPPES match: ', sum(is.na(df$D_nppes))))
 # Aggregate to county-year level -----------------------------------------------
 
 agg_df <- df %>% 
-  group_by(county, year) %>% 
+  group_by(state_fips, county_fips, year) %>% 
   summarise(
     new_md = sum(D_md, na.rm = TRUE),
     new_do = sum(D_do, na.rm = TRUE),
+    new_pcp = sum(D_pcp, na.rm = TRUE),
     new_md_pcp = sum(D_md & D_pcp, na.rm = TRUE),
     new_do_pcp = sum(D_do & D_pcp, na.rm = TRUE),
+    new_spec = sum(D_spec, na.rm = TRUE), 
     new_md_spec = sum(D_md & D_spec, na.rm = TRUE),
     new_do_spec = sum(D_do & D_spec, na.rm = TRUE)
   )
-
-# TODO: Figure out why 2023 is all missing zip 
 
 # Export -----------------------------------------------------------------------
 

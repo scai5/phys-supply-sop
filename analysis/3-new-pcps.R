@@ -62,6 +62,8 @@ get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_c, pre_periods, post_per
 get_cs("new_md_pcp_per_10k", "New MD PCPs per 10k people", df_c, pre_periods, post_periods, balance_e, file_pre = "new-pcps/county/cs/")
 get_cs("new_do_pcp_per_10k", "New DO PCPs per 10k people", df_c,pre_periods, post_periods, balance_e, file_pre = "new-pcps/county/cs/")
 
+get_cs("aprn_medicare_per_10k", "APRNs billing Medicare", df_c,pre_periods, post_periods, balance_e, file_pre = "new-pcps/county/cs/")
+
 ## Stacked a la Cengiz et al. (2019) -------------------------------------------
 
 df <- df %>% mutate(treat_year = ifelse(treat == 0, Inf, effective_year))

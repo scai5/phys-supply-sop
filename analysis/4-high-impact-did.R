@@ -3,7 +3,7 @@
 # "High impact" counties DiD
 # Author:         Shirley Cai 
 # Date created:   02/27/2026 
-# Last edited:    06/22/2026 
+# Last edited:    07/27/2026 
 
 # Idea: Leverage within state variation using pre-policy APRN presence @ county
 # Pre-policy APRN presence = APRNs / (APRN + PCP) in 2010
@@ -21,141 +21,9 @@
 
 # 0. Data preparation ----------------------------------------------------------
 
-aprn_share <- df_c %>% filter(year == 2010) 
+df_ss <- df_c %>% filter(year >= 2010, year <= 2022)
 
-# Create APRN share = APRN / (APRN + PCP)
-aprn_share <- aprn_share %>% 
-  mutate(
-    aprn_share = tot_aprn / (tot_aprn + tot_pcp), 
-    share_quartile = ntile(aprn_share, 4)
-  )
-aprn_share <- aprn_share %>% 
-  group_by(state_fips) %>% 
-  mutate(
-    share_quartile_state = ntile(aprn_share, 4)
-  ) %>% 
-  ungroup()
-aprn_share <- aprn_share %>% 
-  select(state_fips, county_fips, aprn_share, share_quartile, share_quartile_state)
-
-df_ss <- df_c %>% 
-  filter(year >= 2010, year <= 2022) %>% 
-  left_join(aprn_share, by = c('state_fips', 'county_fips'))
-
-df_ss %>% 
-  mutate(rurality = as.factor(ifelse(D_rural == 1, "nonmetro", "metro"))) %>%
-  ggplot(aes(x = aprn_share, fill = rurality)) + 
-  geom_density(alpha = 0.6, position = 'identity', bw = 0.03)
-ggsave(
-  "results/descr/aprn_share_rural.png",  
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-## 0.1. Graph location of counties with highest and lowest quantile -----------------
-county_sf <- counties(cb = TRUE) %>%
-  shift_geometry() %>% 
-  clean_names() %>% 
-  mutate(
-    statefp = as.numeric(statefp), 
-    countyfp = as.numeric(countyfp)
-  )
-
-spatial_data <- aprn_share %>% 
-  left_join(county_sf, by = c('state_fips' = 'statefp', 'county_fips' = 'countyfp'))
-
-map_share <- spatial_data %>% 
-  ggplot() + 
-  geom_sf(aes(fill = aprn_share, geometry = geometry),
-          color = "#ffffff", size = 0.025) +
-  labs(fill = "APRN share") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_share_2010.png",  
-  plot =  map_share, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_quartile <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share quartile") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_quartile_2010.png",  
-  plot =  map_quartile, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_state_quartile <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile_state), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share quartile among state") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_quartile_state_2010.png",  
-  plot =  map_state_quartile, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_q1 <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile == 1), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share Q1") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_q1_2010.png",  
-  plot =  map_q1, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_q4 <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile == 4), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share Q4") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_q4_2010.png",  
-  plot =  map_q4, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_state_q1 <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile_state == 1), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share Q1 within state") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_q1_state_2010.png",  
-  plot =  map_state_q1, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-map_state_q4 <- spatial_data %>%
-  ggplot() + 
-  geom_sf(aes(fill = as.factor(share_quartile_state == 4), geometry = geometry),
-          color = "#ffffff", size = 0.025) + 
-  labs(fill = "APRN share Q4 within state") + 
-  coord_sf(datum = NA)
-ggsave(
-  "results/descr/maps/aprn_q4_state_2010.png",  
-  plot =  map_state_q4, 
-  scale = 1.5, 
-  width = 1200, height = 900, units = "px"
-)
-
-## 0.2 Full sample -------------------------------------------------------------
+## 0.1 Full sample -------------------------------------------------------------
 
 pre_periods <- 5
 post_periods <- 5

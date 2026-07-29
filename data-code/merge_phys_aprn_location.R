@@ -48,6 +48,11 @@ df <- df %>%
 message(paste0('Percent practitioner location with no FIPs match: ', round(sum(is.na(df$full_fips)) / nrow(df), 3)))
 df <- df %>% filter(!is.na(full_fips))
 
+# Add APRN indicator -----------------------------------------------------------
+
+ptax <- read_csv('data/output/nppes_taxonomy.csv') %>% select(npi, year, D_aprn)
+df <- df %>% left_join(ptax, by = c('npi', 'year'))
+
 # Export -----------------------------------------------------------------------
 
 write_csv(df, 'data/output/phys_aprn_location.csv')

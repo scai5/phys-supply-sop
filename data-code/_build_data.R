@@ -3,13 +3,13 @@
 # Building main dataset
 # Author:         Shirley Cai 
 # Date created:   08/01/2025 
-# Last edited:    07/08/2026 
+# Last edited:    07/27/2026 
 
 # Preliminary ------------------------------------------------------------------
 
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(tidyverse, readxl, janitor, modelsummary, gt, lubridate, stringr,
-               fixest, ggfixest, did, crosswalkr, broom, data.table, haven)
+               fixest, ggfixest, did, crosswalkr, broom, data.table, haven, arrow)
 
 # Cleaning raw data ------------------------------------------------------------
 
@@ -100,11 +100,13 @@ state_ahrf <- ahrf %>%
     tot_md_spec = sum(tot_md_spec, na.rm = TRUE), 
     tot_do_spec = sum(tot_do_spec, na.rm = TRUE),
     tot_aprn = sum(tot_aprn, na.rm = TRUE), 
-    population = sum(population, na.rm = TRUE), 
+    population = sum(population, na.rm = TRUE),
     new_md = sum(new_md, na.rm = TRUE), 
     new_do = sum(new_do, na.rm = TRUE),
+    new_pcp = sum(new_pcp, na.rm = TRUE), 
     new_md_pcp = sum(new_md_pcp, na.rm = TRUE),
     new_do_pcp = sum(new_do_pcp, na.rm = TRUE),
+    new_spec = sum(new_spec, na.rm = TRUE), 
     new_md_spec = sum(new_md_spec, na.rm = TRUE),
     new_do_spec = sum(new_do_spec, na.rm = TRUE)
   )
@@ -136,6 +138,8 @@ state_ahrf <- state_ahrf %>%
     new_do_per_10k = new_do / population * 10000, 
     new_do_pcp_per_10k = new_do_pcp / population * 10000, 
     new_do_spec_per_10k = new_do_spec / population * 10000,
+    new_pcp_per_10k = new_pcp / population * 10000, 
+    new_spec_per_10k = new_spec / population * 10000, 
     new_md_per_cap = new_md / population, 
     new_md_pcp_per_cap = new_md_pcp / population, 
     new_md_spec_per_cap = new_md_spec / population, 
@@ -158,6 +162,8 @@ ahrf <- ahrf %>%
     new_do_per_10k = new_do / population * 10000, 
     new_do_pcp_per_10k = new_do_pcp / population * 10000, 
     new_do_spec_per_10k = new_do_spec / population * 10000,
+    new_pcp_per_10k = new_pcp / population * 10000, 
+    new_spec_per_10k = new_spec / population * 10000,
     new_md_per_cap = new_md / population, 
     new_md_pcp_per_cap = new_md_pcp / population, 
     new_md_spec_per_cap = new_md_spec / population, 
@@ -212,8 +218,6 @@ state_df <- state_df %>%
     pcp_per_10k = tot_pcp / population * 10000, 
     tot_spec = tot_md_spec + tot_do_spec, 
     spec_per_10k = md_spec_per_10k + do_spec_per_10k,
-    new_pcp = new_md_pcp + new_do_pcp, 
-    new_pcp_per_10k = new_md_pcp_per_10k + new_do_pcp_per_10k, 
     Dmissing_md = is.na(tot_md), 
     Dmissing_do = is.na(tot_do), 
     Dmissing_md_pcp = is.na(tot_md_pcp), 
@@ -229,8 +233,6 @@ county_df <- county_df %>%
     pcp_per_10k = tot_pcp / population * 10000,
     tot_spec = tot_md_spec + tot_do_spec, 
     spec_per_10k = md_spec_per_10k + do_spec_per_10k, 
-    new_pcp = new_md_pcp + new_do_pcp, 
-    new_pcp_per_10k = new_md_pcp_per_10k + new_do_pcp_per_10k, 
     Dmissing_md = is.na(tot_md), 
     Dmissing_do = is.na(tot_do), 
     Dmissing_md_pcp = is.na(tot_md_pcp), 
@@ -249,6 +251,162 @@ county_df <- county_df %>%
 # Merge in urban rural codes for counties 
 county_df <- county_df %>% left_join(rural_codes, by = c('state_fips', 'county_fips'))
 
+# Merge in APRN services
+aprn_services <- puf_util %>% 
+  group_by(state_fips, county_fips, year) %>% 
+  summarise(
+    aprn_tot_wrvu = sum(tot_wrvu * D_aprn, na.rm = TRUE), 
+    aprn_tot_wrvu_2013 = sum(tot_wrvu_2013 * D_aprn, na.rm = TRUE), 
+    aprn_tot_services = sum(tot_services * D_aprn, na.rm = TRUE), 
+    aprn_tot_services_office = sum(tot_services_office * D_aprn, na.rm = TRUE)
+  )
+aprn_services <- aprn_services %>%
+  mutate(
+    state_fips = as.numeric(state_fips), 
+    county_fips = as.numeric(county_fips)
+  )
+county_df <- county_df %>% 
+  left_join(aprn_services, by = c('state_fips', 'county_fips', 'year')) %>% 
+  mutate(
+    aprn_services_per_bene = aprn_tot_services / medicare_aged_tot, 
+    aprn_services_office_per_bene  = aprn_tot_services_office / medicare_aged_tot
+  )
+
+# APRN density -----------------------------------------------------------------
+
+aprn_share <- county_df %>% filter(year == 2010) 
+
+# Create APRN share = APRN / (APRN + PCP)
+aprn_share <- aprn_share %>% 
+  mutate(
+    aprn_share = tot_aprn / (tot_aprn + tot_pcp), 
+    share_quartile = ntile(aprn_share, 4)
+  )
+aprn_share <- aprn_share %>% 
+  group_by(state_fips) %>% 
+  mutate(
+    share_quartile_state = ntile(aprn_share, 4)
+  ) %>% 
+  ungroup()
+aprn_share <- aprn_share %>% 
+  select(state_fips, county_fips, aprn_share, share_quartile, share_quartile_state)
+
+county_df <- county_df %>% 
+  left_join(aprn_share, by = c('state_fips', 'county_fips'))
+
+county_df %>% 
+  mutate(rurality = as.factor(ifelse(D_rural == 1, "nonmetro", "metro"))) %>%
+  ggplot(aes(x = aprn_share, fill = rurality)) + 
+  geom_density(alpha = 0.6, position = 'identity', bw = 0.03)
+ggsave(
+  "results/descr/aprn_share_rural.png",  
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+## 0.1. Graph location of counties with highest and lowest quantile ------------
+county_sf <- counties(cb = TRUE) %>%
+  shift_geometry() %>% 
+  clean_names() %>% 
+  mutate(
+    statefp = as.numeric(statefp), 
+    countyfp = as.numeric(countyfp)
+  )
+
+spatial_data <- aprn_share %>% 
+  left_join(county_sf, by = c('state_fips' = 'statefp', 'county_fips' = 'countyfp'))
+
+map_share <- spatial_data %>% 
+  ggplot() + 
+  geom_sf(aes(fill = aprn_share, geometry = geometry),
+          color = "#ffffff", size = 0.025) +
+  labs(fill = "APRN share") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_share_2010.png",  
+  plot =  map_share, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_quartile <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share quartile") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_quartile_2010.png",  
+  plot =  map_quartile, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_state_quartile <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile_state), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share quartile among state") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_quartile_state_2010.png",  
+  plot =  map_state_quartile, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_q1 <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile == 1), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share Q1") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_q1_2010.png",  
+  plot =  map_q1, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_q4 <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile == 4), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share Q4") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_q4_2010.png",  
+  plot =  map_q4, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_state_q1 <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile_state == 1), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share Q1 within state") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_q1_state_2010.png",  
+  plot =  map_state_q1, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
+map_state_q4 <- spatial_data %>%
+  ggplot() + 
+  geom_sf(aes(fill = as.factor(share_quartile_state == 4), geometry = geometry),
+          color = "#ffffff", size = 0.025) + 
+  labs(fill = "APRN share Q4 within state") + 
+  coord_sf(datum = NA)
+ggsave(
+  "results/descr/maps/aprn_q4_state_2010.png",  
+  plot =  map_state_q4, 
+  scale = 1.5, 
+  width = 1200, height = 900, units = "px"
+)
+
 # Service mix dataset ----------------------------------------------------------
 
 puf_util <- puf_util %>% 
@@ -261,11 +419,24 @@ puf_util <- puf_util %>%
   left_join(sop, by = c('state_fips' = 'stateFIPS',
                         'year' = 'year')) 
 
+state_names <- read_csv('data/input/nurse-sop/nurse-sop.csv') %>% 
+  select(stateFIPS, state = state_postal) %>% 
+  distinct_all()
+puf_util <- puf_util %>% 
+  left_join(state_names, by = c('state_fips' = 'stateFIPS'))
+
 # Create treatment variables
 puf_util <- puf_util %>% 
   mutate(
     time_to_treat = ifelse(treat == 1, year - effective_year, 0)
   )
+
+# Merge in county-level variables: APRN density, Medicare aged total
+puf_util <- puf_util %>% 
+  left_join(aprn_share, by = c('state_fips', 'county_fips'))
+puf_util <- puf_util %>% 
+  left_join(county_df %>% select(state_fips, county_fips, year, medicare_aged_tot), 
+            by = c('state_fips', 'county_fips','year'))
 
 # Export -----------------------------------------------------------------------
 

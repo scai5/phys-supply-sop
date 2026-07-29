@@ -3,11 +3,77 @@
 # Aggregate Medicare utilization PUF
 # Author:         Shirley Cai 
 # Date created:   06/18/2024  
-# Last edited:    07/09/2026
+# Last edited:    07/27/2026
+#                 Specialty filtering using NPPES
 
-# Import PUF by provider and service -------------------------------------------
+# Import PUF by provider -------------------------------------------------------
 
 years <- formatC(13:22, width = 2, flag = "0")
+
+read_agg <- function(yr){
+  if(yr < 17){
+    raw <- read_csv(paste0("data/input/part-b-puf/by-provider/20", yr, "/MUP_PHY_R24_P05_V10_D", yr, "_Prov.csv"))
+  } else {
+    raw <- read_csv(paste0("data/input/part-b-puf/by-provider/20", yr, "/MUP_PHY_R24_P07_V10_D", yr, "_Prov.csv"))
+  }
+  
+  # Clean variable names 
+  raw <- raw %>% 
+    clean_names() %>%  
+    filter(rndrng_prvdr_ent_cd == "I") %>% 
+    select(
+      npi = rndrng_npi, 
+      tot_benes, 
+      tot_services = tot_srvcs,
+      tot_charges = tot_sbmtd_chrg, 
+      tot_allowed_amt = tot_mdcr_alowd_amt, 
+      tot_payment = tot_mdcr_pymt_amt, 
+      tot_std_amt = tot_mdcr_stdzd_amt, 
+      bene_avg_age, 
+      bene_female = bene_feml_cnt, 
+      bene_male = bene_male_cnt, 
+      bene_white = bene_race_wht_cnt, 
+      bene_black = bene_race_black_cnt, 
+      bene_asian = bene_race_api_cnt, 
+      bene_hispanic = bene_race_hspnc_cnt, 
+      bene_aian = bene_race_nat_ind_cnt, 
+      bene_other_race = bene_race_othr_cnt, 
+      bene_dual_enroll = bene_dual_cnt, 
+      bene_medicare_only = bene_ndual_cnt, 
+      bene_avg_risk = bene_avg_risk_scre
+    ) %>% 
+    mutate(
+      year = as.numeric(paste0("20", yr))
+    )
+}
+
+raw <- lapply(years, read_agg)
+puf_agg <- do.call(rbind.data.frame, raw)  
+
+# Free up memory
+rm(raw)
+gc()
+
+# Create provider level variables
+puf_agg <- puf_agg %>% 
+  mutate(
+    prop_female = bene_female / tot_benes, 
+    prop_black = bene_black / tot_benes, 
+    prop_asian = bene_asian / tot_benes, 
+    prop_hispanic = bene_hispanic / tot_benes, 
+    prop_dual_enroll = bene_dual_enroll / tot_benes
+  )
+
+puf_agg <- puf_agg %>% 
+  select(npi, year, tot_benes, 
+         bene_avg_age, bene_avg_risk,
+         prop_female, prop_black, prop_asian, prop_hispanic, prop_dual_enroll)
+
+write_tsv(puf_agg,'data/temp/puf-agg.txt')
+rm(puf_agg)
+gc()
+
+# Import PUF by provider and service -------------------------------------------
 
 read_puf <- function(yr){
   raw <- read_csv(paste0("data/input/part-b-puf/by-provider-service/Medicare_Physician_Other_Practitioners_by_Provider_and_Service_20", yr, ".csv"))
@@ -34,9 +100,7 @@ read_puf <- function(yr){
       avg_medicare_payment = avg_mdcr_pymt_amt
     ) %>% 
     mutate(
-      year = as.numeric(paste0("20", yr)),
-      credentials = str_replace_all(credentials, " ", ""), 
-      credentials = str_replace_all(credentials, "\\.", "")
+      year = as.numeric(paste0("20", yr))
     )
   
   return(raw)
@@ -51,22 +115,21 @@ gc()
 
 # Sample restriction -----------------------------------------------------------
 
-# TODO: Better specialty filtering using NPPES
+nppes <- read_csv('data/output/nppes.csv') %>% 
+  mutate(D_nppes = 1) 
+puf <- puf %>% left_join(nppes, by = c('npi', 'year'))
 
-pcp_specialty <- c("Family Practice", "General Practice", "Internal Medicine", "Pediatric Medicine")
-aprn_specialty <- c("Nurse Practitioner",
-                    "Certified Registered Nurse Anesthetist (CRNA)", "CRNA", 
-                    "Certified Nurse Midwife",
-                    "Certified Clinical Nurse Specialist")
-specialty_list <- c(pcp_specialty, aprn_specialty)
+rm(nppes)
+gc()
 
-puf <- puf %>% 
-  filter(((grepl("MD|DO", credentials) | is.na(credentials)) & specialty %in% pcp_specialty) | specialty %in% aprn_specialty)
+message(paste0('Total observations: ', nrow(puf)))
+message(paste0('No NPPES match: ', sum(is.na(puf$D_nppes))))
+
+puf <- puf %>% filter(D_pcp == 1 | D_aprn == 1)
+puf <- puf %>% select(-c(D_nppes))
 
 puf <- puf %>% 
   mutate(
-    D_aprn = ifelse(specialty %in% aprn_specialty, 1, 0), 
-    D_np = ifelse(specialty == "Nurse Practitioner", 1, 0),
     D_office = ifelse(place_of_service == "O", 1, 0),
     D_female = ifelse(gender == "F", 1, 0)
   )
@@ -112,11 +175,18 @@ puf_util <- puf_util %>%
 
 # Merge with location data -----------------------------------------------------
 
-prac_loc <- read_csv('data/output/phys_aprn_location.csv')
+prac_loc <- read_csv('data/output/phys_aprn_location.csv') %>% 
+  select(npi, year, state_fips, county_fips, full_fips, zip)
 puf_util <- puf_util %>% 
   left_join(prac_loc, by = c('npi', 'year'))
 
 puf_util <- puf_util %>% filter(!is.na(full_fips))
+
+# Merge with provider level PUF ------------------------------------------------
+
+puf_agg <- read_tsv('data/temp/puf-agg.txt')
+
+puf_util <- puf_util %>% left_join(puf_agg, by = c('npi', 'year'))
 
 # Export -----------------------------------------------------------------------
 

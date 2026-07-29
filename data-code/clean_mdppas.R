@@ -3,12 +3,13 @@
 # Cleaning physician location from MDPPAS
 # Author:         Shirley Cai 
 # Date created:   06/12/2024  
-# Last edited:    07/08/2026
+# Last edited:    07/16/2026
 #                 Updated to include APRNs, indicated with APRN flag
 
 # Import and merge data --------------------------------------------------------
 
-years <- formatC(13:20, width = 2, flag = "0")
+# Place of service zip only populated for 2013-2018
+years <- formatC(13:18, width = 2, flag = "0")
 
 read_mdppas <- function(yr){
   raw <- read_csv(paste0("data/input/mdppas/PhysicianData_20", yr, ".csv"))
@@ -24,22 +25,21 @@ mdppas <- do.call(rbind.data.frame, raw) %>%
 rm(raw)
 gc()
 
+# Filter to only physicians and APRN by NPPES specialty
 # Remove non-physicians
+ptax <- read_csv('data/output/nppes_taxonomy.csv') %>% 
+  mutate(D_ptax = TRUE)
 mdppas <- mdppas %>% 
-  mutate(zip = str_pad(phy_zip_pos1, 5, pad = "0")) %>% 
-  filter(spec_broad <= 8)
-
-mdppas <- mdppas %>% mutate(D_aprn = ifelse(spec_broad <= 6, 0, 1))
-
-# Place of service zip only populated for 2013-2018
-mdppas <- mdppas %>% filter(year <= 2018)
+  left_join(ptax, by = c('npi', 'year')) %>% 
+  filter(D_ptax == TRUE)
+mdppas <- mdppas %>% select(-c(D_ptax))
 
 message('MDPPAS missing zip location -----')
 message(paste0('Phys-year obs missing ZIP: ', sum(is.na(mdppas$phy_zip_pos1))))
 mdppas <- mdppas %>% filter(!is.na(phy_zip_pos1))
 message('Removed obs missing ZIP')
 
-mdppas <- mdppas %>% select(npi, year, sex, spec_broad, spec_prim_1, spec_prim_1_name, phy_zip_pos1)
+mdppas <- mdppas %>% select(npi, year, sex, phy_zip_pos1, D_aprn)
 
 # Export -----------------------------------------------------------------------
 
