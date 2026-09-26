@@ -4,7 +4,7 @@
 # Author:         Shirley Cai 
 # Date created:   06/10/2024  
 # Last edited:    07/16/2026
-#                 Updated to pull speciality from NPPES
+#                 Updated to pull specialty from NPPES
 
 # Import and merge data --------------------------------------------------------
 
@@ -97,7 +97,40 @@ df <- df %>%
 
 # Assign one ZIP to each NPI-year observation ----------------------------------
 
-df <- df %>% group_by(npi, year) %>% mutate(n_zip = length(unique(zip_code))) %>% ungroup()
+df <- df %>% 
+  distinct(npi, year, medical_school_name, graduation_year, zip_code, .keep_all = TRUE)
+message("Removed approximately duplicate rows")
+
+# Merge in CBSA data
+cbsa_xw <- read_tsv('data/output/zipcbsa-xw.txt')
+cbsa_xw <- cbsa_xw %>% mutate(cbsa = ifelse(cbsa == 99999, NA, cbsa))
+df <- df %>% left_join(cbsa_xw, by = c('zip_code' = 'zip'))
+
+# Merge in county data
+county_xw <- read_tsv('data/output/zipcounty-xw.txt')
+county_xw <- county_xw %>% 
+  rename(full_fips = county) %>% 
+  mutate(
+    state_fips = substr(full_fips, 1, 2), 
+    county_fips = substr(full_fips, 3, 5)
+  )
+df <- df %>% left_join(county_xw, by = c('zip_code' = 'zip'))
+
+# Create counts of # ZIP, CBSA, county, etc.
+df <- df %>% 
+  group_by(npi, year) %>% 
+  mutate(
+    n_zip = n_distinct(zip_code), 
+    n_cbsa = n_distinct(cbsa), 
+    n_county = n_distinct(full_fips), 
+    n_state = n_distinct(state_fips)
+  ) %>% 
+  ungroup()
+loc_summ <- df %>% 
+  group_by(npi, year) %>% 
+  summarize(n_zips = n_distinct(zip_code), n_counties = n_distinct(full_fips), .groups = "drop") %>%
+  filter(n_zips > 1) %>%
+  count(single_county = n_counties == 1)
 
 message("Multiple practice ZIPs ----------")
 message(paste0("Total physician-year obs.: ", nrow(df)))
@@ -106,11 +139,6 @@ message(paste0("Multiple ZIP physician-year obs.: ",
 message(paste0("Multiple ZIP physicians: ", 
                length(unique(df$npi[df$n_zip > 1]))))
 
-# Merge in CBSA code
-cbsa_xw <- read_tsv('data/output/zipcbsa-xw.txt')
-df <- df %>% left_join(cbsa_xw, by = c('zip_code' = 'zip'))
-df <- df %>% group_by(npi, year) %>% mutate(n_cbsa = length(unique(cbsa))) %>% ungroup()
-
 message("Multiple practice CBSAs ----------")
 message(paste0("Total physician-year obs.: ", nrow(df)))
 message(paste0("Multiple CBSA physician-year obs.: ", 
@@ -118,17 +146,40 @@ message(paste0("Multiple CBSA physician-year obs.: ",
 message(paste0("Multiple CBSA physicians: ", 
                length(unique(df$npi[df$n_cbsa > 1]))))
 
-rm(cbsa_xw)
-gc()
+message("Multiple practice states ----------")
+message(paste0("Total physician-year obs.: ", nrow(df)))
+message(paste0("Multiple state physician-year obs.: ", 
+               sum(df$n_state > 1)))
+message(paste0("Multiple state physicians: ", 
+               length(unique(df$npi[df$n_state > 1]))))
 
-# TODO: Figure out a better way to determine multiple practice location: CBSA likely not broad enough
+message("Multiple practice counties ----------")
+message(paste0("Total physician-year obs.: ", nrow(df)))
+message(paste0("Multiple county physician-year obs.: ", 
+               sum(df$n_county > 1)))
+message(paste0("Multiple county physicians: ", 
+               length(unique(df$npi[df$n_county > 1]))))
 
 df <- df %>% filter(n_cbsa == 1)
 message("Removed physicians practicing in multiple CBSA codes")
 
+# Recreate counts of # ZIP, CBSA, county, etc.
 df <- df %>% 
-  distinct(npi, year, medical_school_name, graduation_year, zip_code, .keep_all = TRUE)
-message("Removed approximately duplicate rows")
+  group_by(npi, year) %>% 
+  mutate(
+    n_zip = n_distinct(zip_code), 
+    n_county = n_distinct(full_fips), 
+    n_state = n_distinct(state_fips)
+  ) %>% 
+  ungroup()
+loc_summ <- df %>% filter(D_aprn == 0) %>% 
+  group_by(npi, year) %>% 
+  summarize(n_zips = n_distinct(zip_code), n_counties = n_distinct(full_fips), .groups = "drop") %>%
+  count(single_county = n_counties == 1)
+
+# TODO: Assign using deterministic rule later, but drop for now
+df <- df %>% filter(n_county == 1)
+message("Removed physicians practicing in multiple counties")
 
 # Prepare for export -----------------------------------------------------------
 

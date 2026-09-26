@@ -9,7 +9,8 @@
 
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(tidyverse, readxl, janitor, modelsummary, gt, lubridate, stringr,
-               fixest, ggfixest, did, crosswalkr, broom, data.table, haven, arrow)
+               fixest, ggfixest, did, crosswalkr, broom, data.table, haven, arrow,
+               tigris, ivreg)
 
 # Cleaning raw data ------------------------------------------------------------
 
@@ -409,10 +410,25 @@ ggsave(
 
 # Service mix dataset ----------------------------------------------------------
 
+# Assigning counties at baseline year
+provider_baseline_c <- puf_util %>%
+  filter(year == 2013) %>% 
+  distinct(npi, full_fips)
+provider_not_baseline_c <- puf_util %>% 
+  filter(!(npi %in% provider_baseline_c$npi)) %>% 
+  group_by(npi) %>% 
+  filter(year == min(year)) %>% 
+  distinct(npi, full_fips)
+provider_canon_c <- bind_rows(provider_baseline_c, provider_not_baseline_c)
+
+# TODO: Confirm that there is one 
+
 puf_util <- puf_util %>% 
+  select(-c(state_fips, county_fips, full_fips, zip)) %>% 
+  left_join(provider_canon_c, by = c('npi')) %>% 
   mutate(
-    state_fips = as.double(state_fips), 
-    county_fips = as.double(county_fips)
+    state_fips = as.double(substr(full_fips, 1, 2)), 
+    county_fips = as.double(substr(full_fips, 3, 5))
   )
 
 puf_util <- puf_util %>% 
@@ -438,9 +454,54 @@ puf_util <- puf_util %>%
   left_join(county_df %>% select(state_fips, county_fips, year, medicare_aged_tot), 
             by = c('state_fips', 'county_fips','year'))
 
+# County level service mix
+new_patients <- puf_util %>% 
+  group_by(state_fips, county_fips, year) %>% 
+  summarise(
+    pcp_new_em_visits = sum(D_pcp * new_sick_visits, na.rm = TRUE),
+    tot_new_em_visits = sum(new_sick_visits, na.rm = TRUE), 
+    pcp_new_medicare_visits = sum(D_pcp * new_medicare_visits, na.rm = TRUE), 
+    tot_new_medicare_visits = sum(new_medicare_visits, na.rm = TRUE), 
+    pcp_est_em_visits = sum(D_pcp * est_sick_visits, na.rm = TRUE), 
+    tot_est_em_visits = sum(est_sick_visits, na.rm = TRUE),
+    pcp_new_em_visits = sum(D_pcp * new_sick_visits, na.rm = TRUE),
+    tot_new_em_visits = sum(new_sick_visits, na.rm = TRUE),
+    pcp_chronic_care = sum(D_pcp * chronic_care, na.rm = TRUE), 
+    tot_chronic_care = sum(chronic_care, na.rm = TRUE),
+    pcp_adv_care_plan = sum(D_pcp * adv_care_plan, na.rm = TRUE), 
+    tot_adv_care_plan = sum(adv_care_plan, na.rm = TRUE),
+    pcp_behavioral_screening = sum(D_pcp * behavioral_screening, na.rm = TRUE), 
+    tot_behavioral_screening = sum(behavioral_screening, na.rm = TRUE),
+    pcp_smoking_cessation = sum(D_pcp * smoking_cessation, na.rm = TRUE), 
+    tot_smoking_cessation = sum(smoking_cessation, na.rm = TRUE),
+    pcp_inr_monitor = sum(D_pcp * inr_monitor, na.rm = TRUE), 
+    tot_inr_monitor = sum(inr_monitor, na.rm = TRUE),
+    pcp_home_inr_monitor = sum(D_pcp * home_inr_monitor, na.rm = TRUE), 
+    tot_home_inr_monitor = sum(home_inr_monitor, na.rm = TRUE)
+  ) %>%
+  mutate(
+    state_fips = as.numeric(state_fips), 
+    county_fips = as.numeric(county_fips)
+  )
+
+county_df <- county_df %>% 
+  left_join(new_patients, by = c('state_fips', 'county_fips', 'year')) %>% 
+  mutate(
+    pcp_share_new_em_visits = pcp_new_em_visits / tot_new_em_visits, 
+    pcp_share_new_medicare_visits = pcp_new_medicare_visits / tot_new_medicare_visits, 
+    pcp_share_est_em_visits = pcp_est_em_visits / tot_est_em_visits, 
+    pcp_share_chronic_care = pcp_chronic_care / tot_chronic_care,
+    pcp_share_adv_care_plan = pcp_adv_care_plan / tot_adv_care_plan,
+    pcp_share_behavioral_screening = pcp_behavioral_screening / tot_behavioral_screening,
+    pcp_share_smoking_cessation = pcp_smoking_cessation / tot_smoking_cessation,
+    pcp_share_inr_monitor = pcp_inr_monitor / tot_inr_monitor,
+    pcp_share_home_inr_monitor = pcp_home_inr_monitor / tot_home_inr_monitor
+  )
+
 # Export -----------------------------------------------------------------------
 
 write_csv(county_df, 'data/output/final_df_county.csv')
 write_csv(state_df, 'data/output/final_df_state.csv')
 write_csv(puf_util, 'data/output/final_service_mix.csv')
 rm(list = ls())
+gc()

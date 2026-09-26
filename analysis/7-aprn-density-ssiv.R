@@ -18,7 +18,7 @@ pre_periods <- 5
 post_periods <- 5
 balance_e <- NULL
 
-get_cs("aprn_medicare_per_10k", "Billing APRNs", df_ss, pre_periods, post_periods, balance_e, file_pre = "archive/")
+billing_aprns <- get_cs("aprn_medicare_per_10k", "Billing APRNs", df_ss, pre_periods, post_periods, balance_e, file_pre = "ssiv/", file_ext = "_county", idname = "full_fips")
 
 # "Global" variables -----------------------------------------------------------
 

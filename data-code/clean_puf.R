@@ -75,6 +75,8 @@ gc()
 
 # Import PUF by provider and service -------------------------------------------
 
+years <- formatC(13:22, width = 2, flag = "0")
+
 read_puf <- function(yr){
   raw <- read_csv(paste0("data/input/part-b-puf/by-provider-service/Medicare_Physician_Other_Practitioners_by_Provider_and_Service_20", yr, ".csv"))
   
@@ -125,6 +127,16 @@ gc()
 message(paste0('Total observations: ', nrow(puf)))
 message(paste0('No NPPES match: ', sum(is.na(puf$D_nppes))))
 
+# For unmatched providers, assign PCP and APRN indicators using specialty
+pcp_specialty <- c("Family Practice", "General Practice", "Internal Medicine")
+aprn_specialty <- c("Certified Clinical Nurse Specialist", "Certified Nurse Midwife", 
+                    "Certified Registered Nurse Anesthetist (CRNA)", "CRNA")
+puf <- puf %>% 
+  mutate(
+    D_pcp = ifelse(is.na(D_nppes), as.numeric(specialty %in% pcp_specialty), D_pcp), 
+    D_aprn = ifelse(is.na(D_nppes), as.numeric(specialty %in% aprn_specialty), D_aprn)
+  )
+
 puf <- puf %>% filter(D_pcp == 1 | D_aprn == 1)
 puf <- puf %>% select(-c(D_nppes))
 
@@ -145,6 +157,23 @@ puf <- puf %>%
   left_join(rvu, by = c('hcpcs_cd', 'year')) %>% 
   left_join(rvu_2013, by = c('hcpcs_cd'))
 
+# Add indicators for services of note
+puf <- puf %>% 
+  mutate(
+    D_new_patient_sick = ifelse(hcpcs_cd >= 99201 & hcpcs_cd <= 99205, 1, 0),
+    D_new_patient_sick_severe = ifelse(hcpcs_cd >= 99204 & hcpcs_cd <= 99205, 1, 0),
+    D_est_patient_sick = ifelse(hcpcs_cd >= 99211 & hcpcs_cd <= 99215, 1, 0),
+    D_est_patient_sick_severe = ifelse(hcpcs_cd >= 99214 & hcpcs_cd <= 99215, 1, 0),
+    D_new_Medicare = ifelse(hcpcs_cd == "G0402", 1, 0), 
+    D_est_Medicare = ifelse(hcpcs_cd == "G0439", 1, 0),
+    D_chronic_care = ifelse(hcpcs_cd == 99490 | hcpcs_cd == 99487 | hcpcs_cd == 99489, 1, 0), 
+    D_adv_care_plan = ifelse(hcpcs_cd == 99497 | hcpcs_cd == 99498, 1, 0), 
+    D_behavioral_screening = ifelse(hcpcs_cd == "G0442" | hcpcs_cd == "G0443" | hcpcs_cd == "G0444", 1, 0), 
+    D_smoking_cessation = ifelse(hcpcs_cd == 99406 | hcpcs_cd == 99498, 1, 0), 
+    D_inr_monitor = ifelse(hcpcs_cd == 99363 | hcpcs_cd == 99364 | hcpcs_cd == 93792, 1, 0), 
+    D_home_inr_monitor = ifelse(hcpcs_cd == "G0250", 1, 0)
+  )
+
 # Summarize RVUs per service at practitioner-year level
 puf_util <- puf %>% 
   group_by(npi, year) %>% 
@@ -159,8 +188,25 @@ puf_util <- puf %>%
     tot_services_office = sum(tot_services * D_office, na.rm = TRUE), 
     tot_services = sum(tot_services), 
     
+    # Patient office visits
+    new_sick_visits = sum(D_new_patient_sick * tot_services, na.rm = TRUE),
+    new_sick_severe_visits = sum(D_new_patient_sick_severe * tot_services, na.rm = TRUE),
+    est_sick_visits = sum(D_est_patient_sick * tot_services, na.rm = TRUE),
+    est_sick_severe_visits = sum(D_est_patient_sick_severe * tot_services, na.rm = TRUE),
+    new_medicare_visits = sum(D_new_Medicare * tot_services, na.rm = TRUE), 
+    est_medicare_visits = sum(D_est_Medicare * tot_services, na.rm = TRUE),
+    
+    # Moving away from xyz code groups
+    chronic_care = sum(D_chronic_care * tot_services, na.rm = TRUE),
+    adv_care_plan = sum(D_adv_care_plan * tot_services, na.rm = TRUE),
+    behavioral_screening = sum(D_behavioral_screening * tot_services, na.rm = TRUE),
+    smoking_cessation = sum(D_smoking_cessation * tot_services, na.rm = TRUE),
+    inr_monitor = sum(D_inr_monitor * tot_services, na.rm = TRUE),
+    home_inr_monitor = sum(D_home_inr_monitor * tot_services, na.rm = TRUE),
+    
     # Practitioner characteristics
     D_aprn = first(D_aprn), 
+    D_pcp = first(D_pcp), 
     D_female = first(D_female)
   )
 

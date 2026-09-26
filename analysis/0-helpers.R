@@ -76,17 +76,21 @@ get_sunab <- function(outcome, var_desc, df, period = "year", file_pre = "", fil
   return(dd_out)
 }
 
-# Callaway and Sant'Anna specification 
+# Callaway and Sant'Anna event study and ATT estimate 
 get_cs <- function(outcome, var_desc, df, pre_periods, post_periods, balance_e = NULL, 
-                   file_root = "results/event-study/", file_pre = "", file_ext = ""){
+                   file_root = "results/", file_pre = "", file_ext = "", 
+                   idname = "state_fips", control_group = "notyettreated", 
+                   allow_unbalanced_panel = TRUE){
   out <- att_gt(yname = outcome, 
                 tname = "year", 
-                idname = "state_fips", 
+                idname = idname, 
                 gname = "treat_year",
                 data = df,
-                allow_unbalanced_panel = TRUE,
-                control_group = "notyettreated", 
+                allow_unbalanced_panel = allow_unbalanced_panel,
+                control_group = control_group, 
                 clustervars = c("state_fips"))
+  
+  # Event study
   es <- aggte(out, 
               na.rm = TRUE,
               type = "dynamic", 
@@ -96,17 +100,42 @@ get_cs <- function(outcome, var_desc, df, pre_periods, post_periods, balance_e =
   p <- ggdid(es,
              xlab = "Time to SOP expansion", 
              title = paste0("Outcome: ", var_desc))
-  
   ggsave(
     filename = paste0(file_root, file_pre, outcome, file_ext, '.png'), 
     plot = p, 
     scale = 2, width = 1200, height = 900, units = 'px'
   )
-  return(out)
+  
+  # Staggered DiD
+  did <- aggte(out, 
+               na.rm = TRUE, 
+               type = "simple", 
+               min_e = -pre_periods, 
+               max_e = post_periods, 
+               balance_e = balance_e)
+  return(did)
 }
 
-# Stacked specification
-get_stacked_df <- function(df, pre_periods, post_periods){
+# Helper to get control mean
+get_control_mean <- function(model, control_group = c("notyettreated", "nevertreated")) {
+  control_group <- match.arg(control_group)
+  
+  d <- model$DIDparams$data
+  gname <- model$DIDparams$gname
+  yname <- model$DIDparams$yname
+  tname <- model$DIDparams$tname
+  
+  in_control <- switch(control_group,
+                       nevertreated  = d[[gname]] == 0,
+                       notyettreated = d[[gname]] == 0 | d[[tname]] < d[[gname]]
+  )
+  
+  mean(d[[yname]][in_control], na.rm = TRUE)
+}
+
+# Stacked ----------------------------------------------------------------------
+
+get_stacked_df <- function(df, pre_periods, post_periods, unit_name = "state_fips"){
   
   df <- df %>% mutate(treat_year = ifelse(is.infinite(treat_year), NA, treat_year))
   
@@ -130,7 +159,7 @@ get_stacked_df <- function(df, pre_periods, post_periods){
         rel_time    = year - g,                   # relative time
         treated     = as.integer(!is.na(treat_year)),
         post        = as.integer(year >= g),
-        unit_fe     = paste0(state_fips, "_", g),
+        unit_fe     = paste0(unit_name, "_", g),
         time_fe     = paste0(year,       "_", g)
       )
     
@@ -157,96 +186,6 @@ get_stacked <- function(outcome, var_desc, df, file_pre = "", file_ext = ""){
   return(dd_out)
 }
 
-# Staggered DiD ----------------------------------------------------------------
-
-# Callaway and Sant'Anna specification
-get_cs_did <- function(outcome, var_desc, df, pre_periods, post_periods, balance_e = NULL){
-  out <- att_gt(yname = outcome, 
-                tname = "year", 
-                idname = "state_fips", 
-                gname = "treat_year", 
-                data = df, 
-                allow_unbalanced_panel = TRUE, 
-                control_group = "notyettreated", 
-                clustervars = c("state_fips"))
-  did <- aggte(out, 
-               na.rm = TRUE, 
-               type = "simple", 
-               min_e = -pre_periods, 
-               max_e = post_periods, 
-               balance_e = balance_e)
-  return(did)
-}
-
-# Tables -----------------------------------------------------------------------
-
-# Tidy AGGTE 
-tidy.AGGTEobj <- function(x, ...) {
-  z_stat <- x$overall.att / x$overall.se
-  p_val <- 2 * pnorm(-abs(z_stat))
-  
-  data.frame(
-    term = "ATT",
-    estimate = x$overall.att,
-    std.error = x$overall.se,
-    statistic = z_stat,
-    p.value = p_val,
-    stringsAsFactors = FALSE
-  )
-}
-
-# Glance method
-glance.AGGTEobj <- function(x, ...) {
-  data.frame(
-    nobs = NA_integer_,
-    stringsAsFactors = FALSE
-  )
-}
-
-# Helper to convert AGGTEobj to modelsummary-compatible format
-convert_aggte <- function(model) {
-  structure(
-    list(
-      tidy = tidy.AGGTEobj(model),
-      glance = glance.AGGTEobj(model)
-    ),
-    class = "modelsummary_list"
-  )
-}
-
-# Wrapper to convert a list of models using convert_aggte
-convert_models <- function(models){
-  converted_models <- lapply(models, function(m) {
-    if (inherits(m, "AGGTEobj")) {
-      convert_aggte(m)
-    } else {
-      m
-    }
-  })
-  names(converted_models) <- names(models)
-  return(converted_models)
-}
-
-# Create and save a table
-get_table <- function(models, gof_map, rows, title, source_note, file_name){
-  # Convert to form readable by modelsummary
-  converted_models <- convert_models(models)
-  
-  res <- modelsummary(converted_models, 
-                      stars = c('*' = .1, '**' = .05, '***' = 0.01),
-                      gof_map = gof_map,
-                      add_rows = rows,
-                      output = "gt")
-  res <- res %>% 
-    tab_header(title = md(title)) %>% 
-    tab_source_note(source_note = source_note) %>% 
-    opt_horizontal_padding(scale = 3)
-  
-  gtsave(res, paste0("results/did/", file_name, ".html"))
-  gtsave(res, paste0("results/did/", file_name, ".tex"))
-}
-
-# Stacked DiD ------------------------------------------------------------------
 
 get_stacked_att <- function(outcome, df, pre_periods, post_periods){
   fml_string <- as.formula(paste0(outcome, " ~ i(rel_time, treat, ref = -1) | unit_fe + time_fe"))
@@ -299,6 +238,100 @@ get_stacked_table <- function(results, mean_row, title, source_note, file_name){
   
   gtsave(gt_table, paste0("results/did/", file_name, ".html"))
   gtsave(gt_table, paste0("results/did/", file_name, ".tex"))
+}
+
+# Tables -----------------------------------------------------------------------
+
+# Helper to convert AGGTEobj to modelsummary-compatible format, including mean, effect size, N
+convert_aggte <- function(model, control_mean) {
+  # Estimate
+  att <- model$overall.att
+  se  <- model$overall.se
+  z_stat <- att / se
+  p_val  <- 2 * pnorm(-abs(z_stat))
+  
+  # Get sample size N
+  n_val <- tryCatch({
+    if (!is.null(model$DIDparams$data)) {
+      nrow(model$DIDparams$data)
+    } else {
+      NA_integer_
+    }
+  }, error = function(e) NA_integer_)
+  
+  effect_size <- 100 * att / control_mean  # % of control mean
+  
+  tidy_df <- data.frame(
+    term      = c("ATT", "Control group mean", "Implied effect (%)", "N"),
+    estimate  = c(sprintf("%.3f", att),
+                  sprintf("%.3f", control_mean),
+                  sprintf("%.1f", effect_size),
+                  formatC(n_val, format = "d", big.mark = ",")),
+    std.error = c(sprintf("%.3f", se), NA, NA, NA),
+    statistic = c(z_stat, NA, NA, NA),
+    p.value   = c(p_val, NA, NA, NA),
+    stringsAsFactors = FALSE
+  )
+  
+  glance_df <- data.frame(nobs = NA_integer_, stringsAsFactors = FALSE)
+  
+  structure(list(tidy = tidy_df, glance = glance_df), class = "modelsummary_list")
+}
+
+# Wrapper to convert a list of models using convert_aggte
+convert_models <- function(models, control_means){
+  if (!setequal(names(models), names(control_means))) {
+    stop("names(models) and names(control_means) must match exactly.")
+  }
+  out <- Map(convert_aggte, models, control_means[names(models)])
+  names(out) <- names(models)
+  out
+}
+
+# Create and save a table
+get_table <- function(models_a, models_b = NULL,
+                      control_means_a, control_means_b = NULL,
+                      title, source_note, file_name, 
+                      panel_a_label = "Panel A", panel_b_label = "Panel B", 
+                      col_labels = NULL){
+  
+  # Convert to make readable by modelsummary
+  converted_a <- convert_models(models_a, control_means_a)
+  
+  if (is.null(models_b)) {
+    # Single-panel path — no rbind
+    res <- modelsummary(
+      converted_a,
+      stars   = c('*' = .1, '**' = .05, '***' = 0.01),
+      gof_map = list(),
+      fmt     = NULL,
+      output  = "gt"
+    )
+  } else {
+    converted_b <- convert_models(models_b, control_means_b)
+    panels <- setNames(list(converted_a, converted_b), c(panel_a_label, panel_b_label))
+    
+    res <- modelsummary(
+      panels,
+      shape   = "rbind",
+      stars   = c('*' = .1, '**' = .05, '***' = 0.01),
+      gof_map = list(),
+      fmt     = NULL,
+      output  = "gt"
+    )
+  }
+  
+  if (!is.null(col_labels)) {
+    res <- res %>% cols_label(.list = as.list(col_labels))
+  }
+  
+  res <- res %>%
+    tab_header(title = md(title)) %>%
+    tab_source_note(source_note = source_note) %>%
+    opt_horizontal_padding(scale = 3)
+  
+  gtsave(res, paste0("results/", file_name, ".html"))
+  gtsave(res, paste0("results/", file_name, ".tex"))
 }
 
 # Helpers for shift-share IV ---------------------------------------------------

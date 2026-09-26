@@ -9,7 +9,8 @@
 
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(tidyverse, readxl, janitor, modelsummary, gt, lubridate, stringr,
-               fixest, ggfixest, did, crosswalkr, broom, ivreg, tigris)
+               fixest, ggfixest, did, crosswalkr, broom, data.table, haven, arrow,
+               tigris, ivreg)
 
 # Read in data -----------------------------------------------------------------
 
@@ -20,10 +21,16 @@ df_c <- read_csv('data/output/final_df_county.csv')
 # Analysis files ---------------------------------------------------------------
 
 source('analysis/0-helpers.R')
+
+# TODO: Edit this
 source('analysis/1-descriptives.R')
+
 source('analysis/2-agg-labor-supply.R')
 source('analysis/3-new-pcps.R')
-source('analysis/4-high-impact-did.R')
-source('analysis/5-high-impact-ssiv.R')
-source('analysis/6-urban-rural.R')
-source('analysis/7-service-mix.R')
+source('analysis/4-service-volume.R')
+source('analysis/5-service-mix.R')
+
+# TODO: Edit
+source('analysis/6-by-aprn-density.R')
+source('analysis/7-aprn-density-ssiv.R')
+source('analysis/8-by-urban-rural.R')

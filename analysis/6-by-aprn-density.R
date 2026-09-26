@@ -21,6 +21,13 @@
 
 # 0. Data preparation ----------------------------------------------------------
 
+df_c <- df_c %>%
+  mutate(
+    full_fips = paste0(formatC(state_fips, width = 2, flag = "0"), 
+                       formatC(county_fips, width = 3, flag = "0")),
+    full_fips = as.numeric(full_fips)
+  )
+
 df_ss <- df_c %>% filter(year >= 2010, year <= 2022)
 
 ## 0.1 Full sample -------------------------------------------------------------
@@ -31,15 +38,15 @@ balance_e <- NULL
 
 get_cs("pcp_per_10k", "PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_all")
+       file_ext = "_all", idname = "full_fips")
 
 get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_all")
+       file_ext = "_all", idname = "full_fips")
 
 # Staggered DiD
-pcp_pc <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e)
-new_pcp_pc <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e)
+pcp_pc <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e, idname = "full_fips")
+new_pcp_pc <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_ss, pre_periods, post_periods, balance_e, idname = "full_fips")
 
 # 1. DiD within highest quartile APRN share ------------------------------------
 
@@ -50,10 +57,10 @@ df_q <- df_ss %>% filter(share_quartile == 4)
 # Staggered
 get_cs("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_high")
+       file_ext = "_high", idname = "full_fips")
 get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_high")
+       file_ext = "_high", idname = "full_fips")
 
 # Stacked
 # TODO
@@ -61,8 +68,8 @@ get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_per
 ## DiD -------------------------------------------------------------------------
 
 # Staggered
-pcp_pc_high <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
-new_pcp_pc_high <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
+pcp_pc_high <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
+new_pcp_pc_high <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
 
 # Stacked
 # TODO
@@ -76,10 +83,10 @@ df_q <- df_ss %>% filter(share_quartile == 1)
 # Staggered
 get_cs("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_low")
+       file_ext = "_low", idname = "full_fips")
 get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_low")
+       file_ext = "_low", idname = "full_fips")
 
 # Stacked 
 # TODO
@@ -87,8 +94,8 @@ get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_per
 ## DiD -------------------------------------------------------------------------
 
 # Staggered
-pcp_pc_low <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
-new_pcp_pc_low <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
+pcp_pc_low <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
+new_pcp_pc_low <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
 
 # Stacked 
 # TODO
@@ -102,10 +109,10 @@ df_q <- df_ss %>% filter(share_quartile_state == 4)
 # Staggered
 get_cs("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_high_state")
+       file_ext = "_high_state", idname = "full_fips")
 get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_high_state")
+       file_ext = "_high_state", idname = "full_fips")
 
 # Stacked 
 # TODO
@@ -113,8 +120,8 @@ get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_per
 ## DiD -------------------------------------------------------------------------
 
 # Staggered
-pcp_pc_high_state <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
-new_pcp_pc_high_state <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
+pcp_pc_high_state <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
+new_pcp_pc_high_state <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
 
 # Stacked 
 # TODO
@@ -128,10 +135,10 @@ df_q <- df_ss %>% filter(share_quartile_state == 1)
 # Staggered
 get_cs("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_low_state")
+       file_ext = "_low_state", idname = "full_fips")
 get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, 
        file_root = "results/high-low-did/event-study/", 
-       file_ext = "_low_state")
+       file_ext = "_low_state", idname = "full_fips")
 
 # Stacked 
 # TODO
@@ -139,8 +146,8 @@ get_cs("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_per
 ## DiD -------------------------------------------------------------------------
 
 # Staggered 
-pcp_pc_low_state <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
-new_pcp_pc_low_state <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e)
+pcp_pc_low_state <- get_cs_did("pcp_per_10k", "PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
+new_pcp_pc_low_state <- get_cs_did("new_pcp_per_10k", "New PCPs per 10k people", df_q, pre_periods, post_periods, balance_e, idname = "full_fips")
 
 # Stacked 
 # TODO
