@@ -3,7 +3,7 @@
 # Building main dataset
 # Author:         Shirley Cai 
 # Date created:   08/01/2025 
-# Last edited:    07/27/2026 
+# Last edited:    09/26/2026 
 
 # Preliminary ------------------------------------------------------------------
 
@@ -53,6 +53,7 @@ aprn <- read_csv('data/output/phys-compare-aprn.csv')
 bls <- read_csv('data/output/annual_wage.csv')
 rural_codes <- read_csv('data/output/rural_counties.csv')
 puf_util <- read_tsv('data/output/puf_util.txt')
+rural_codes <- read_csv('data/output/rural_counties.csv')
 
 # Merge AHRF and aggregated Physician Compare ----------------------------------
 
@@ -453,6 +454,8 @@ puf_util <- puf_util %>%
 puf_util <- puf_util %>% 
   left_join(county_df %>% select(state_fips, county_fips, year, medicare_aged_tot), 
             by = c('state_fips', 'county_fips','year'))
+puf_util <- puf_util %>% 
+  left_join(rural_codes, by = c('state_fips', 'county_fips'))
 
 # County level service mix
 new_patients <- puf_util %>% 
